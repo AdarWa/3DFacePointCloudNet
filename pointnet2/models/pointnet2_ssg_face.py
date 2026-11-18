@@ -8,7 +8,7 @@ from __future__ import (
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import etw_pytorch_utils as pt_utils
+from pointnet2.utils import pytorch_utils as pt_utils
 from collections import namedtuple
 #import sys
 #sys.path.append('/home/zzy/file/experiment/PointNet/Pointnet2_PyTorch-master_knn')
@@ -98,7 +98,7 @@ class Pointnet2SSG(nn.Module):
         return xyz, features, carvture
 
     def forward(self, pointcloud):
-        # type: (Pointnet2SSG, torch.cuda.FloatTensor) -> pt_utils.Seq
+        # type: (Pointnet2SSG, torch.cuda.FloatTensor) -> torch.Tensor
         r"""
             Forward pass of the network
 

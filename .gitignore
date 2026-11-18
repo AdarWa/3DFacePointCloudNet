@@ -1,1 +1,5 @@
 __pycache__/
+build/
+*.egg-info/
+pointnet2/_ext*.so
+log/

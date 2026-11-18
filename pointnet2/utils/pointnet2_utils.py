@@ -8,7 +8,7 @@ from __future__ import (
 import torch
 from torch.autograd import Function
 import torch.nn as nn
-import etw_pytorch_utils as pt_utils
+from pointnet2.utils import pytorch_utils as pt_utils
 import sys
 
 try:
@@ -39,7 +39,7 @@ class RandomDropout(nn.Module):
 
     def forward(self, X):
         theta = torch.Tensor(1).uniform_(0, self.p)[0]
-        return pt_utils.feature_dropout_no_scaling(X, theta, self.train, self.inplace)
+        return pt_utils.feature_dropout_no_scaling(X, theta, self.training, self.inplace)
 
 
 class FurthestPointSampling(Function):

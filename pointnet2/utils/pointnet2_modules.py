@@ -8,9 +8,8 @@ from __future__ import (
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import etw_pytorch_utils as pt_utils
+from pointnet2.utils import pytorch_utils as pt_utils
 import sys
-sys.path.append('/home/zzy/file/experiment/PointNet/Pointnet2_PyTorch-master_Curvature')
 from pointnet2.utils import pointnet2_utils
 
 if False:

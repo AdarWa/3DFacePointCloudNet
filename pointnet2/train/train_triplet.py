@@ -44,6 +44,7 @@ from pointnet2.data.TripletNpyFaceDataset import (
     load_npy_cloud,
 )
 import pointnet2.data.data_utils as d_utils
+from pointnet2.utils.pytorch_utils import load_checkpoint
 
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
@@ -231,18 +232,6 @@ def make_gallery_probe(groups):
     return g_files, g_cls, p_files, p_cls
 
 
-def load_checkpoint(model, optimizer, filename):
-    if not osp.isfile(filename):
-        raise FileNotFoundError("Checkpoint '{}' not found".format(filename))
-    print("==> Loading from checkpoint '{}'".format(filename))
-    ckpt = torch.load(filename, map_location="cpu")
-    state = ckpt.get("model_state", ckpt) if isinstance(ckpt, dict) else ckpt
-    model.load_state_dict(state)
-    if optimizer is not None and ckpt.get("optimizer_state") is not None:
-        optimizer.load_state_dict(ckpt["optimizer_state"])
-    print("==> Done")
-
-
 def checkpoint_state(model=None, optimizer=None, best_prec=None, epoch=None, it=None):
     optim_state = optimizer.state_dict() if optimizer is not None else None
     if model is not None:
@@ -334,8 +323,9 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     if args.model_checkpoint is not None:
-        load_checkpoint(model, optimizer if args.resume_optimizer else None,
-                        args.model_checkpoint)
+        if load_checkpoint(model, optimizer if args.resume_optimizer else None,
+                           args.model_checkpoint) is None:
+            raise FileNotFoundError(args.model_checkpoint)
         for param_group in optimizer.param_groups:
             param_group['lr'] = args.lr
 
