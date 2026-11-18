@@ -58,7 +58,7 @@ the `checkpoints/model.pth.tar` is `train_cls` result.
 ### Triplet training on preprocessed `.npy` point clouds
 `train_triplet` reads a folder (searched recursively) of preprocessed scans:
 
-* file name `{image_id}_{subject}.npy` (the subject is the text after the last `_`)
+* file name `{subject}_{image_id}.npy` (the subject is the text before the first `_`)
 * array shape `[4096, 7]`: XYZ (0-2, zero-mean, unit-sphere scaled), normals (3-5), curvature (6)
 
 Because the clouds are already cleaned, centred, scaled and sampled to 4096 points, no

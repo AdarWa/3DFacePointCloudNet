@@ -1,6 +1,6 @@
 """Triplet fine-tuning on preprocessed ``.npy`` face point clouds.
 
-Data: a folder (searched recursively) of ``{image_id}_{subject}.npy`` files,
+Data: a folder (searched recursively) of ``{subject}_{image_id}.npy`` files,
 each a ``[4096, 7]`` array = XYZ (centred, unit sphere) | normals | curvature.
 
 Example
@@ -59,7 +59,7 @@ def parse_args():
     )
     # data
     parser.add_argument("-data_root", type=str, required=True,
-                        help="Folder of {image_id}_{subject}.npy files ([N,7] clouds)")
+                        help="Folder of {subject}_{image_id}.npy files ([N,7] clouds)")
     parser.add_argument("-val_root", type=str, default=None,
                         help="Optional separate folder of .npy files for validation. "
                              "If omitted, a per-subject split of -data_root is used.")
