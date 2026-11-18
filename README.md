@@ -24,6 +24,26 @@ python -m pointnet2.train.train_triplet -model_checkpoint=checkpoints/model.pth.
 ```
 the `checkpoints/model.pth.tar` is `train_cls` result.
 
+### Triplet training on preprocessed `.npy` point clouds
+`train_triplet` reads a folder (searched recursively) of preprocessed scans:
+
+* file name `{image_id}_{subject}.npy` (the subject is the text after the last `_`)
+* array shape `[4096, 7]`: XYZ (0-2, zero-mean, unit-sphere scaled), normals (3-5), curvature (6)
+
+Because the clouds are already cleaned, centred, scaled and sampled to 4096 points, no
+coordinate normalisation is applied. Subjects with fewer than `-min_samples` (default 20)
+scans are dropped, and a per-subject split (`-val_ratio`, default 0.2) is held out for
+validation (one gallery scan per subject, the rest are probes) unless `-val_root` is given.
+```
+python -m pointnet2.train.train_triplet -data_root /path/to/npy_faces \
+    -model_checkpoint checkpoints/20191028_1000cls_model_best.pth.tar \
+    --margin 0.3 --num_triplet 30000
+```
+Useful options: `-curvature_power` (default 0.1, the `curv**0.1` transform the pretrained
+model was trained with; use 1.0 if your curvature is already transformed), `-augment`
+(small rotations + jitter), `-num_points` (default 4096). Check a dataset with
+`python -m pointnet2.data.TripletNpyFaceDataset /path/to/npy_faces`.
+
 ## Results
 **Comparison of verification rates at 0.1% FAR achieved on the FRGCv2 dataset**
 

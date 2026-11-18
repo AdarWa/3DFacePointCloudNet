@@ -7,3 +7,4 @@ from __future__ import (
 )
 from .GPMM_Normal_Curvature_dataset import GPMMNormalCurvDataset
 from .TripletFaceDataset import TripletFaceDataset
+from .TripletNpyFaceDataset import TripletNpyFaceDataset
