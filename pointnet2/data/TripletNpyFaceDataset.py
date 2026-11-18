@@ -2,8 +2,8 @@
 
 Expected input
 --------------
-* File naming: ``{image_id}_{subject}.npy``. The subject is taken as the text
-  after the *last* underscore, so image ids may themselves contain underscores.
+* File naming: ``{subject}_{image_id}.npy``. The subject is taken as the text
+  before the *first* underscore, so image ids may themselves contain underscores.
   Files may sit flat in one folder or in nested sub-folders.
 * Array shape: ``[N, 7]`` (normally ``N = 4096``) with channels
     0-2 XYZ (zero-mean, scaled into the unit sphere)
@@ -28,13 +28,13 @@ NUM_CHANNELS = 7
 
 
 def parse_subject(path):
-    """Return the subject id of a ``{image_id}_{subject}.npy`` file."""
+    """Return the subject id of a ``{subject}_{image_id}.npy`` file."""
     stem = os.path.splitext(os.path.basename(path))[0]
     if "_" not in stem:
         raise ValueError(
-            "File name '{}' does not follow '{{image_id}}_{{subject}}.npy'".format(path)
+            "File name '{}' does not follow '{{subject}}_{{image_id}}.npy'".format(path)
         )
-    return stem.rsplit("_", 1)[1]
+    return stem.split("_", 1)[0]
 
 
 def find_npy_files(root):
