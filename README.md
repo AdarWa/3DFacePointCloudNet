@@ -11,11 +11,42 @@ Experimental results on two public 3D face benchmarks show that the network trai
 ## Network train
 ### setup
 Our work is based on [erikwijmans/Pointnet2_PyTorch](https://github.com/erikwijmans/Pointnet2_PyTorch). We modify the sampling and network struture in our project.
-First, we should building ext moudle  
-```
-python setup.py build_ext --inplace
-```
-then we can get a `.so` file in `/pointnet2`  
+
+The code no longer depends on `etw_pytorch_utils`; the few helpers it provided
+(`SharedMLP`, `Seq`, checkpoint loading) now live in `pointnet2/utils/pytorch_utils.py`
+and keep the same parameter names, so existing checkpoints (e.g.
+`checkpoints/20191028_1000cls_model_best.pth.tar`) load unchanged.
+
+Requirements: Python >= 3.8, an NVIDIA GPU, PyTorch with CUDA, and a CUDA toolkit
+(`nvcc`) whose version matches the one PyTorch was built with (`python -c "import torch; print(torch.version.cuda)"`).
+
+1. Install PyTorch for your CUDA version (see https://pytorch.org/get-started/locally/), then the rest:
+   ```
+   pip install -r requirements.txt
+   ```
+2. Build the CUDA ops (`pointnet2._ext`: furthest point sampling, ball query, grouping, interpolation):
+   ```
+   python setup.py build_ext --inplace
+   ```
+   This creates `pointnet2/_ext.*.so`. Alternatively install the package with
+   `pip install -e . --no-build-isolation`.
+   If you build on a machine without a visible GPU (e.g. in Docker), set the target
+   architectures first, e.g. `export TORCH_CUDA_ARCH_LIST="7.5;8.6;8.9"`.
+3. Check the build:
+   ```
+   python -c "import pointnet2._ext as e; print([n for n in dir(e) if not n.startswith('_')])"
+   ```
+
+Troubleshooting the build:
+* `CUDA compiler and CUDA toolkit headers are incompatible` / `Unsupported .version` (ptxas):
+  your `nvcc` and CUDA headers come from different CUDA releases. Use one toolkit whose
+  version matches `torch.version.cuda`, and point `CUDA_HOME` at it.
+* `cannot find -lcudart` with a pip-installed CUDA toolkit (`nvidia-cuda-*` wheels): only
+  `libcudart.so.<major>` is shipped. Create a `libcudart.so` symlink to it in some folder
+  and add that folder to `LIBRARY_PATH`.
+
+Run the training scripts from the repository root (`python -m pointnet2.train...`) so
+that the `pointnet2` package is importable.
 ### Example training
 Training examples are provided by `pointnet2/train/train_cls.py` and `pointnet2/train/train_triplet.py`. `train_cls` is used to pre-train on generated data and `train_triplet` is used to fine tune on real faces to get better results.  
 ```

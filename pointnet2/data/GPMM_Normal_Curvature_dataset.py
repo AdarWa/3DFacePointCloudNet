@@ -3,14 +3,9 @@ import torch.utils.data as data
 import os
 import os.path
 import sys
-sys.path.append('/home/zzy/file/experiment/PointNet/Pointnet2_PyTorch-master_Curvature')
-from torchvision import transforms
 import torch
 
 import numpy as np
-import h5py
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import struct
 import time
 from random import shuffle
@@ -118,6 +113,7 @@ class GPMMNormalCurvDataset(data.Dataset):
     
 
 if __name__ == '__main__':
+    from torchvision import transforms
     print('test')
     transforms = transforms.Compose(
         [

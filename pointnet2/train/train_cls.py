@@ -10,7 +10,7 @@ import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
-import etw_pytorch_utils as pt_utils
+from pointnet2.utils import pytorch_utils as pt_utils
 import os.path as osp
 import os
 import argparse
@@ -277,13 +277,13 @@ if __name__ == "__main__":
     # load status from checkpoint
     if args.model_checkpoint is not None:
         checkpoint_status = pt_utils.load_checkpoint(
-            model, optimizer, filename=args.model_checkpoint.split(".")[0]
+            model, optimizer, filename=args.model_checkpoint
         )
         if checkpoint_status is not None:
             it, start_epoch, best_loss = checkpoint_status
     if args.cls_checkpoint is not None:
         checkpoint_status = pt_utils.load_checkpoint(
-            classifier, optimizer, filename=args.cls_checkpoint.split(".")[0]
+            classifier, optimizer, filename=args.cls_checkpoint
         )
         if checkpoint_status is not None:
             it, start_epoch, best_loss = checkpoint_status
