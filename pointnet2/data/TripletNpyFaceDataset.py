@@ -17,6 +17,7 @@ legacy ``.bcnc`` loader, which divided raw millimetre coordinates by 100).
 from __future__ import print_function
 
 import os
+import random
 from collections import defaultdict
 
 import numpy as np
@@ -171,6 +172,99 @@ class TripletNpyFaceDataset(data.Dataset):
         return len(self.training_triplets)
 
 
+def groups_to_samples(groups):
+    """dict subject -> files  =>  ([(path, label_idx), ...], [subject per label_idx])."""
+    subjects = sorted(groups.keys())
+    samples = [(path, idx) for idx, subject in enumerate(subjects)
+               for path in groups[subject]]
+    return samples, subjects
+
+
+class SingleScanNpyDataset(data.Dataset):
+    """Single ``.npy`` scans for online (in-batch) triplet mining.
+
+    ``samples`` is a list of ``(file_path, label_idx)``; items are
+    ``(points [num_points, 7] float tensor, label_idx)``.
+
+    With ``augment=True`` each scan gets a small random yaw rotation (applied to
+    both XYZ and normals) and Gaussian XYZ jitter.
+    """
+
+    def __init__(self, samples, num_points=4096, curvature_power=0.1, augment=False,
+                 max_yaw=0.15, jitter_std=0.005):
+        self.samples = list(samples)
+        self.num_points = num_points
+        self.curvature_power = curvature_power
+        self.augment = augment
+        self.max_yaw = max_yaw
+        self.jitter_std = jitter_std
+
+    @property
+    def labels(self):
+        return [label for _, label in self.samples]
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        path, label = self.samples[idx]
+        pts = load_npy_cloud(path, self.num_points, self.curvature_power)
+        if self.augment:
+            theta = np.random.uniform(-self.max_yaw, self.max_yaw)
+            c, s = np.cos(theta), np.sin(theta)
+            rot = torch.tensor([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]],
+                               dtype=pts.dtype)
+            pts[:, 0:3] = pts[:, 0:3] @ rot.t()
+            pts[:, 3:6] = pts[:, 3:6] @ rot.t()
+            pts[:, 0:3] += torch.randn(pts.size(0), 3, dtype=pts.dtype) * self.jitter_std
+        return pts, label
+
+
+class PKSampler(data.Sampler):
+    """Batch sampler yielding ``P`` random subjects x ``K`` scans each.
+
+    Subjects with fewer than ``K`` scans are sampled with replacement. Use it as
+    ``DataLoader(dataset, batch_sampler=PKSampler(...))``.
+    """
+
+    def __init__(self, labels, p=8, k=4, batches_per_epoch=500, seed=None):
+        self.label_to_indices = defaultdict(list)
+        for idx, lbl in enumerate(labels):
+            self.label_to_indices[int(lbl)].append(idx)
+        self.unique_labels = sorted(self.label_to_indices.keys())
+        if len(self.unique_labels) < 2:
+            raise ValueError("PKSampler needs at least 2 subjects, got {}"
+                             .format(len(self.unique_labels)))
+        if p > len(self.unique_labels):
+            print("PKSampler: P={} > {} subjects, using P={}".format(
+                p, len(self.unique_labels), len(self.unique_labels)))
+            p = len(self.unique_labels)
+        if k < 2:
+            raise ValueError("PKSampler needs K >= 2 to form positive pairs")
+        self.p = p
+        self.k = k
+        self.batches_per_epoch = batches_per_epoch
+        self.rng = random.Random(seed)
+
+    @property
+    def batch_size(self):
+        return self.p * self.k
+
+    def __iter__(self):
+        for _ in range(self.batches_per_epoch):
+            batch = []
+            for lbl in self.rng.sample(self.unique_labels, self.p):
+                idxs = self.label_to_indices[lbl]
+                if len(idxs) >= self.k:
+                    batch.extend(self.rng.sample(idxs, self.k))
+                else:
+                    batch.extend(self.rng.choices(idxs, k=self.k))
+            yield batch
+
+    def __len__(self):
+        return self.batches_per_epoch
+
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description="Sanity-check an .npy face dataset")
@@ -180,6 +274,9 @@ if __name__ == '__main__':
     g = group_by_subject(find_npy_files(a.root), a.min_samples)
     print({s: len(f) for s, f in g.items()})
     tr, va = split_by_subject(g, 0.2)
-    ds = TripletNpyFaceDataset(tr, n_triplets=10)
-    x = ds[0]
-    print(x[0].shape, x[0].dtype, x[3], x[4])
+    samples, subjects = groups_to_samples(tr)
+    ds = SingleScanNpyDataset(samples)
+    batch = next(iter(PKSampler(ds.labels, p=4, k=4, batches_per_epoch=1)))
+    print('PK batch labels:', [ds.samples[i][1] for i in batch])
+    x, y = ds[batch[0]]
+    print(x.shape, x.dtype, subjects[y])
