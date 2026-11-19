@@ -8,7 +8,12 @@ Example
 python -m pointnet2.train.train_triplet \
     -data_root /path/to/npy_faces \
     -model_checkpoint checkpoints/20191028_1000cls_model_best.pth.tar \
-    --margin 0.3 --num_triplet 30000
+    -P 8 -K 4 -batches_per_epoch 500 -lr 5e-5 --margin 0.3
+
+Training uses P x K batches (P subjects, K scans each) and online batch-hard
+triplet mining: one forward pass per batch, and each scan is trained against its
+hardest positive (furthest same-subject scan) and hardest negative (closest
+other-subject scan) in the batch, on L2-normalised embeddings.
 
 A held-out, per-subject split of the data (``-val_ratio``) is used for
 validation unless ``-val_root`` points at a separate folder. Validation uses
@@ -31,19 +36,20 @@ import time
 import numpy as np
 import torch
 import torch.optim as optim
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torchvision import transforms as T
 from sklearn import metrics
 
 from pointnet2.models import Pointnet2FaceClsSSG as Pointnet
 from pointnet2.data.TripletNpyFaceDataset import (
-    TripletNpyFaceDataset,
+    SingleScanNpyDataset,
+    PKSampler,
+    groups_to_samples,
     find_npy_files,
     group_by_subject,
     split_by_subject,
     load_npy_cloud,
 )
-import pointnet2.data.data_utils as d_utils
 from pointnet2.utils.pytorch_utils import load_checkpoint
 
 torch.backends.cudnn.enabled = True
@@ -74,14 +80,18 @@ def parse_args():
                         help="Apply curv**p to channel 6 (0.1 matches the original "
                              "pipeline / pretrained checkpoint; use 1.0 to leave as is)")
     parser.add_argument("-augment", action="store_true",
-                        help="Small random rotations + jitter on training clouds")
+                        help="Small random yaw rotation + XYZ jitter on training clouds")
     parser.add_argument("-num_workers", type=int, default=4)
     # optimisation
-    parser.add_argument("-batch_size", type=int, default=8, help="Batch size")
+    parser.add_argument("-P", type=int, default=8, help="Subjects per batch")
+    parser.add_argument("-K", type=int, default=4,
+                        help="Scans per subject per batch (with replacement if a "
+                             "subject has fewer)")
+    parser.add_argument("-batches_per_epoch", type=int, default=500)
     parser.add_argument("-weight_decay", type=float, default=1e-5, help="L2 regularization coeff")
-    parser.add_argument("-lr", type=float, default=1e-4, help="Initial learning rate")
-    parser.add_argument("-epochs", type=int, default=30, help="Number of epochs to train for")
-    parser.add_argument("-print_freq", type=int, default=10, help="Iterations between log lines")
+    parser.add_argument("-lr", type=float, default=5e-5, help="Initial learning rate")
+    parser.add_argument("-epochs", type=int, default=20, help="Number of epochs to train for")
+    parser.add_argument("-print_freq", type=int, default=20, help="Iterations between log lines")
     parser.add_argument("-model_checkpoint", type=str, default=None,
                         help="Checkpoint (.pth.tar) to initialise the network from")
     parser.add_argument("-resume_optimizer", action="store_true",
@@ -89,23 +99,43 @@ def parse_args():
     parser.add_argument("-checkpoint_dir", type=str, default="checkpoints")
     parser.add_argument("-log_file", type=str, default="./log/triplet_log.txt")
     # triplet loss
-    parser.add_argument('--margin', type=float, default=0.4, metavar='MARGIN',
-                        help='margin for the (cosine-distance) triplet loss')
-    parser.add_argument('--num_triplet', type=int, default=10000, metavar='num_triplet',
-                        help='number of triplets generated per epoch')
+    parser.add_argument('--margin', type=float, default=0.3, metavar='MARGIN',
+                        help='margin of the batch-hard triplet loss (Euclidean '
+                             'distance on L2-normalised embeddings)')
     return parser.parse_args()
 
 
-def cosine_distance(x1, x2):
-    """1 - cos(x1, x2), row-wise. Range [0, 2]."""
-    assert x1.size() == x2.size()
-    return 1.0 - torch.nn.functional.cosine_similarity(x1, x2, dim=1).clamp(-1, 1)
+def batch_hard_triplet_loss(embeddings, labels, margin=0.3):
+    """Online batch-hard triplet loss.
 
+    For every anchor in the batch: hardest positive = furthest same-label scan
+    (excluding itself), hardest negative = closest other-label scan. Distances
+    are Euclidean on L2-normalised embeddings, so they lie in [0, 2].
 
-def triplet_margin_loss(anchor, positive, negative, margin):
-    d_p = cosine_distance(anchor, positive)
-    d_n = cosine_distance(anchor, negative)
-    return torch.clamp(margin + d_p - d_n, min=0.0).mean()
+    Returns ``(loss, num_hard)``; the loss is averaged over the anchors that
+    violate the margin only, so easy anchors don't dilute the gradient.
+    """
+    embeddings = F.normalize(embeddings, p=2, dim=1)
+    # ||a - b||^2 = 2 - 2 cos(a, b) for unit vectors. The clamp keeps sqrt's
+    # gradient finite for identical scans (e.g. duplicates drawn with replacement).
+    sim = embeddings @ embeddings.t()
+    dist = torch.sqrt(torch.clamp(2.0 - 2.0 * sim, min=1e-12))
+
+    labels = labels.view(-1, 1)
+    same_id = labels.eq(labels.t())
+    eye = torch.eye(labels.size(0), dtype=torch.bool, device=labels.device)
+
+    pos_mask = same_id & ~eye
+    hardest_pos = dist.masked_fill(~pos_mask, -1.0).max(dim=1).values
+    hardest_neg = dist.masked_fill(same_id, 1e6).min(dim=1).values
+
+    valid = pos_mask.any(dim=1) & (~same_id).any(dim=1)
+    losses = F.relu(hardest_pos - hardest_neg + margin) * valid
+    active = losses > 0
+    num_hard = int(active.sum().item())
+
+    loss = losses[active].mean() if num_hard > 0 else losses.sum() * 0.0
+    return loss, num_hard
 
 
 class AverageMeter(object):
@@ -138,38 +168,30 @@ def adjust_learning_rate(optimizer, epoch):
             param_group['lr'] *= 0.1
 
 
-def train(train_loader, model, optimizer, epoch):
+def train(train_loader, model, optimizer, epoch, margin):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
+    hard_frac = AverageMeter()
 
     model.train()
 
     end = time.time()
-    for i, (data_a, data_p, data_n, label_p, label_n) in enumerate(train_loader):
+    for i, (data, labels) in enumerate(train_loader):
         data_time.update(time.time() - end)
-        data_a = data_a.cuda(non_blocking=True)
-        data_p = data_p.cuda(non_blocking=True)
-        data_n = data_n.cuda(non_blocking=True)
+        data = data.cuda(non_blocking=True)
+        labels = labels.cuda(non_blocking=True)
 
-        out_a, out_p, out_n = model(data_a), model(data_p), model(data_n)
+        embeddings = model(data)  # one forward pass for all P*K scans
+        loss, num_hard = batch_hard_triplet_loss(embeddings, labels, margin=margin)
 
-        # keep only triplets that violate the margin (semi-hard / hard)
-        with torch.no_grad():
-            d_p = cosine_distance(out_a, out_p)
-            d_n = cosine_distance(out_a, out_n)
-            hard = (d_n - d_p < args.margin).nonzero(as_tuple=True)[0]
-        if hard.numel() == 0:
-            end = time.time()
-            continue
+        if num_hard > 0:
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        loss = triplet_margin_loss(out_a[hard], out_p[hard], out_n[hard], args.margin)
-        losses.update(loss.item(), data_a.size(0))
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
+        losses.update(loss.item(), data.size(0))
+        hard_frac.update(num_hard / data.size(0), data.size(0))
         batch_time.update(time.time() - end)
         end = time.time()
 
@@ -178,10 +200,16 @@ def train(train_loader, model, optimizer, epoch):
                 'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                 'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                 'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                'Hard {hard}/{bs}'.format(
+                'Hard {hard}/{bs} (avg {hard_avg:.1%})'.format(
                     epoch, i, len(train_loader), batch_time=batch_time,
-                    data_time=data_time, loss=losses, hard=hard.numel(),
-                    bs=data_a.size(0)))
+                    data_time=data_time, loss=losses, hard=num_hard,
+                    bs=data.size(0), hard_avg=hard_frac.avg))
+
+
+def seed_worker(worker_id):
+    # DataLoader seeds torch/random per worker but not NumPy; without this,
+    # forked workers would draw identical augmentations / resampling.
+    np.random.seed(torch.initial_seed() % 2 ** 32)
 
 
 def extract_features(model, file_list):
@@ -285,29 +313,27 @@ if __name__ == "__main__":
     describe('Train', train_groups)
     describe('Val', val_groups)
 
-    train_transforms = None
-    if args.augment:
-        train_transforms = T.Compose([
-            d_utils.PointcloudRotate(axis=np.array([1, 0, 0])),
-            d_utils.PointcloudRotate(axis=np.array([0, 1, 0])),
-            d_utils.PointcloudRotate(axis=np.array([0, 0, 1])),
-            d_utils.PointcloudJitter(std=0.002),
-        ])
-
-    train_dataset = TripletNpyFaceDataset(
-        train_groups,
-        n_triplets=args.num_triplet,
-        n_points=args.num_points,
-        transforms=train_transforms,
+    train_samples, _ = groups_to_samples(train_groups)
+    train_dataset = SingleScanNpyDataset(
+        train_samples,
+        num_points=args.num_points,
         curvature_power=args.curvature_power,
+        augment=args.augment,
     )
+    pk_sampler = PKSampler(
+        labels=train_dataset.labels,
+        p=args.P,
+        k=args.K,
+        batches_per_epoch=args.batches_per_epoch,
+    )
+    log('PK batches: P={} subjects x K={} scans = {} per batch, {} batches/epoch'.format(
+        pk_sampler.p, pk_sampler.k, pk_sampler.batch_size, len(pk_sampler)))
     train_loader = DataLoader(
         train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
+        batch_sampler=pk_sampler,
         num_workers=args.num_workers,
         pin_memory=True,
-        drop_last=True,  # BatchNorm needs > 1 sample per batch
+        worker_init_fn=seed_worker,
     )
 
     eg_files, eg_cls, ep_files, ep_cls = make_gallery_probe(val_groups)
@@ -336,9 +362,7 @@ if __name__ == "__main__":
     best_top1 = -1.0
     for epoch in range(args.epochs):
         adjust_learning_rate(optimizer, epoch)
-        if epoch > 0:
-            train_dataset.regenerate()  # fresh random triplets each epoch
-        train(train_loader, model, optimizer, epoch)
+        train(train_loader, model, optimizer, epoch, args.margin)
         top1 = validate(model, eg_files, eg_cls, ep_files, ep_cls) if do_val else 0.0
         is_best = do_val and top1 > best_top1
         best_top1 = max(best_top1, top1)

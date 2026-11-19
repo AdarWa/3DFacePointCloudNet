@@ -65,15 +65,29 @@ Because the clouds are already cleaned, centred, scaled and sampled to 4096 poin
 coordinate normalisation is applied. Subjects with fewer than `-min_samples` (default 20)
 scans are dropped, and a per-subject split (`-val_ratio`, default 0.2) is held out for
 validation (one gallery scan per subject, the rest are probes) unless `-val_root` is given.
+Training uses **P x K batches with online batch-hard mining**: each batch holds P subjects
+with K scans each (sampled with replacement when a subject has fewer than K), the whole
+batch goes through the network in one forward pass, and every scan is trained against its
+hardest positive (furthest same-subject scan) and hardest negative (closest other-subject
+scan) in the batch. Distances are Euclidean on L2-normalised embeddings, and the loss is
+averaged over the anchors that violate the margin.
 ```
 python -m pointnet2.train.train_triplet -data_root /path/to/npy_faces \
     -model_checkpoint checkpoints/20191028_1000cls_model_best.pth.tar \
-    --margin 0.3 --num_triplet 30000
+    -P 8 -K 4 -batches_per_epoch 500 -epochs 20 -lr 5e-5 --margin 0.3
 ```
-Useful options: `-curvature_power` (default 0.1, the `curv**0.1` transform the pretrained
-model was trained with; use 1.0 if your curvature is already transformed), `-augment`
-(small rotations + jitter), `-num_points` (default 4096). Check a dataset with
-`python -m pointnet2.data.TripletNpyFaceDataset /path/to/npy_faces`.
+Options:
+* `-P` / `-K` (default 8 x 4 = 32 scans per batch). P=12, K=4 gives more negatives per
+  anchor if GPU memory allows; `-num_points 2048` (default 4096) reduces memory.
+* `--margin` (default 0.3). The log line `Hard n/B` counts anchors that still violate the
+  margin; consider raising the margin to 0.4 if it falls below roughly 4/32.
+* `-lr` (default 5e-5). Batch-hard gradients are sharper than random-triplet ones, so a
+  high learning rate can collapse the embedding early.
+* `-curvature_power` (default 0.1, the `curv**0.1` transform the pretrained model was
+  trained with; use 1.0 if your curvature is already transformed).
+* `-augment`: small random yaw rotation (applied to XYZ and normals) plus XYZ jitter.
+
+Check a dataset with `python -m pointnet2.data.TripletNpyFaceDataset /path/to/npy_faces`.
 
 ## Results
 **Comparison of verification rates at 0.1% FAR achieved on the FRGCv2 dataset**
