@@ -4,9 +4,11 @@ Point clouds-based networks have achieved great attention in 3D object classific
 Experimental results on two public 3D face benchmarks show that the network trained only on synthesized data can also be well generalized to 'in-the-wild' 3D face recognition. Our method achieves the state-of-the-art results by achieving an overall rank-1 identification rate of 99.46\% and 99.65\% on FRGCv2 and Bosphorus, respectively. Further, we evaluate on a self-collected dataset to demonstrate the robustness and application potential of our method.
 
 ## Data prepare
-1. Download the [BFM2017](https://faces.dmi.unibas.ch/bfm/bfm2017.html) h5 file `model2017-1_face12_nomouth.h5`. Move into `/data`.  
-2. Using `GenerateTrainData.m` to generate total 500,000 face scans.
-3. Using [PCL](http://pointclouds.org/) to computer normal and curvature.
+The original pipeline used MATLAB (`Data/GenerateTrainData.m`) and PCL. It is now
+replaced by a pure-Python generator (see [Training on generated faces](#training-on-generated-faces)):
+1. Download the [BFM2017](https://faces.dmi.unibas.ch/bfm/bfm2017.html) h5 file `model2017-1_face12_nomouth.h5` and move it into `Data/`.
+2. Run `python -m pointnet2.data.generate_faces --bfm Data/model2017-1_face12_nomouth.h5 --out Data/synthetic`.
+   It computes normals and curvature itself, so PCL is not needed.
 
 ## Network train
 ### setup
@@ -48,12 +50,53 @@ Troubleshooting the build:
 Run the training scripts from the repository root (`python -m pointnet2.train...`) so
 that the `pointnet2` package is importable.
 ### Example training
-Training examples are provided by `pointnet2/train/train_cls.py` and `pointnet2/train/train_triplet.py`. `train_cls` is used to pre-train on generated data and `train_triplet` is used to fine tune on real faces to get better results.  
+Training examples are provided by `pointnet2/train/train_cls.py` and `pointnet2/train/train_triplet.py`. `train_cls` pre-trains on generated data, and `train_triplet` fine-tunes on real faces for better results.
 ```
-python -m pointnet2.train.train_cls
-python -m pointnet2.train.train_triplet -model_checkpoint=checkpoints/model.pth.tar  --margin=0.3 --num_triplet=30000
+python -m pointnet2.train.train_cls -data_root Data/synthetic -checkpoint_dir runs/synthetic
+python -m pointnet2.train.train_triplet -data_root /path/to/real_npy -model_checkpoint runs/synthetic/pointnet2_model_best.pth.tar
 ```
-the `checkpoints/model.pth.tar` is `train_cls` result.
+
+### Training on generated faces
+One command generates the synthetic faces and pre-trains the network on them
+(run from the repository root, after the setup above and downloading the BFM file):
+```
+bash scripts/train_synthetic.sh
+```
+Settings are environment variables, for example:
+```
+SUBJECTS=2000 SCANS=30 EPOCHS=15 WORKERS=16 bash scripts/train_synthetic.sh
+```
+| variable | default | meaning |
+|---|---|---|
+| `BFM` | `Data/model2017-1_face12_nomouth.h5` | BFM2017 model |
+| `OUT` | `Data/synthetic` | where generated faces go |
+| `RUN` | `runs/synthetic` | checkpoints and logs |
+| `SUBJECTS` / `SCANS` | 1000 / 20 | identities (classes) and scans per identity |
+| `POINTS` | 4096 | points per scan |
+| `NOISE` | 0 | Gaussian vertex noise in mm (simulates a scanner) |
+| `EPOCHS`, `BATCH`, `LR`, `CLASSIFIER` | 10, 32, 1e-3, AL | classification training (`AL`, `MCP` or `L`) |
+| `REAL_DATA` | unset | folder of real `.npy` scans: also runs triplet fine-tuning |
+
+Extra arguments go to `train_cls`, e.g. `bash scripts/train_synthetic.sh -resume`.
+Both stages can be re-run safely: subjects that are already generated are skipped,
+and `-resume` continues training from the last epoch.
+
+The pipeline runs two steps you can also run on their own:
+
+1. **Generation** (`python -m pointnet2.data.generate_faces --help`): for each subject, one
+   random BFM shape; for each scan, a random expression (`--neutral_first` makes scan 000
+   neutral). Per-vertex normals come from the mesh, and curvature is the PCL surface
+   variation `l0/(l0+l1+l2)` over `--curvature_k` neighbours. Then `--num_points`
+   vertices are sampled. Output is `OUT/<subject>/<subject>_<scan>.npy`, `[4096, 7]`,
+   the same format as the real-data loader. Coordinates default to zero-mean, unit-sphere
+   (`--normalize unit_sphere`) to match the real scans used for fine-tuning.
+   `--normalize nose_mm100` gives the paper's nose-centred mm/100 instead. A few
+   `.ply` previews are written to `OUT/_preview` so you can check the faces.
+   Seeds are fixed per subject, and `--start_subject` adds more subjects to an existing set.
+2. **Classification pre-training** (`python -m pointnet2.train.train_cls --help`):
+   each subject is one class, and `-val_ratio` (default 0.1) of each subject's scans is
+   held out to measure accuracy. The backbone is saved to
+   `RUN/pointnet2_model_best.pth.tar`, which is what `train_triplet -model_checkpoint` takes.
 
 ### Triplet training on preprocessed `.npy` point clouds
 `train_triplet` reads a folder (searched recursively) of preprocessed scans:

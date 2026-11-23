@@ -3,3 +3,5 @@ build/
 *.egg-info/
 pointnet2/_ext*.so
 log/
+Data/synthetic/
+runs/

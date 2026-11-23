@@ -187,17 +187,19 @@ class SingleScanNpyDataset(data.Dataset):
     ``(points [num_points, 7] float tensor, label_idx)``.
 
     With ``augment=True`` each scan gets a small random yaw rotation (applied to
-    both XYZ and normals) and Gaussian XYZ jitter.
+    both XYZ and normals) and Gaussian XYZ jitter. ``transforms`` is an optional
+    extra callable applied to the ``[num_points, 7]`` tensor afterwards.
     """
 
     def __init__(self, samples, num_points=4096, curvature_power=0.1, augment=False,
-                 max_yaw=0.15, jitter_std=0.005):
+                 max_yaw=0.15, jitter_std=0.005, transforms=None):
         self.samples = list(samples)
         self.num_points = num_points
         self.curvature_power = curvature_power
         self.augment = augment
         self.max_yaw = max_yaw
         self.jitter_std = jitter_std
+        self.transforms = transforms
 
     @property
     def labels(self):
@@ -217,6 +219,8 @@ class SingleScanNpyDataset(data.Dataset):
             pts[:, 0:3] = pts[:, 0:3] @ rot.t()
             pts[:, 3:6] = pts[:, 3:6] @ rot.t()
             pts[:, 0:3] += torch.randn(pts.size(0), 3, dtype=pts.dtype) * self.jitter_std
+        if self.transforms is not None:
+            pts = self.transforms(pts)
         return pts, label
 
 
