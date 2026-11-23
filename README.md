@@ -56,6 +56,13 @@ python -m pointnet2.train.train_cls -data_root Data/synthetic -checkpoint_dir ru
 python -m pointnet2.train.train_triplet -data_root /path/to/real_npy -model_checkpoint runs/synthetic/pointnet2_model_best.pth.tar
 ```
 
+### Full pipeline notebook
+[`notebooks/face_pipeline.ipynb`](notebooks/face_pipeline.ipynb) runs every step on a GPU (e.g. Kaggle):
+generation, 1000-class pre-training, triplet fine-tuning, PK (batch-hard) fine-tuning and a
+final comparison (ROC, CMC, score distributions, t-SNE, failure cases), all on identities
+unseen in training. All settings are in one configuration cell. Each stage is skipped when its
+`final.pth.tar` exists and resumes from `last.pth.tar` after an interruption.
+
 ### Training on generated faces
 Two steps (run from the repository root, after the setup above and downloading the BFM file):
 ```

@@ -292,5 +292,24 @@ def main(argv=None):
         print("Preview .ply files (open in MeshLab / CloudCompare): {}".format(prev))
 
 
+def generate(bfm, out, **options):
+    """Python API for the command line, e.g. from a notebook::
+
+        generate("Data/model2017-1_face12_nomouth.h5", "Data/synthetic",
+                 num_subjects=1000, scans_per_subject=20, neutral_first=True)
+
+    Keyword names are the command-line options without ``--``. A boolean option
+    is passed when True and left out when False.
+    """
+    argv = ["--bfm", str(bfm), "--out", str(out)]
+    for key, value in options.items():
+        if isinstance(value, bool):
+            if value:
+                argv.append("--" + key)
+        elif value is not None:
+            argv += ["--" + key, str(value)]
+    main(argv)
+
+
 if __name__ == "__main__":
     main()

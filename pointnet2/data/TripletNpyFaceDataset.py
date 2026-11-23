@@ -78,6 +78,20 @@ def split_by_subject(groups, val_ratio=0.2, seed=0):
     return train, val
 
 
+def split_subjects(groups, test_ratio=0.2, seed=0):
+    """Identity-disjoint split into (train_groups, test_groups).
+
+    Unlike ``split_by_subject`` no subject appears in both splits, so the test
+    set measures recognition of identities never seen during training.
+    """
+    subjects = sorted(groups)
+    np.random.RandomState(seed).shuffle(subjects)
+    n_test = max(1, int(round(len(subjects) * test_ratio))) if test_ratio > 0 else 0
+    test = set(subjects[:n_test])
+    return ({s: groups[s] for s in sorted(groups) if s not in test},
+            {s: groups[s] for s in sorted(test)})
+
+
 def load_npy_cloud(path, n_points=None, curvature_power=1.0):
     """Load one ``[N, 7]`` cloud as a float32 tensor.
 

@@ -51,6 +51,7 @@ from pointnet2.data.TripletNpyFaceDataset import (
     load_npy_cloud,
 )
 from pointnet2.utils.pytorch_utils import load_checkpoint
+from pointnet2.utils.face_eval import batch_hard_triplet_loss
 
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
@@ -103,39 +104,6 @@ def parse_args():
                         help='margin of the batch-hard triplet loss (Euclidean '
                              'distance on L2-normalised embeddings)')
     return parser.parse_args()
-
-
-def batch_hard_triplet_loss(embeddings, labels, margin=0.3):
-    """Online batch-hard triplet loss.
-
-    For every anchor in the batch: hardest positive = furthest same-label scan
-    (excluding itself), hardest negative = closest other-label scan. Distances
-    are Euclidean on L2-normalised embeddings, so they lie in [0, 2].
-
-    Returns ``(loss, num_hard)``; the loss is averaged over the anchors that
-    violate the margin only, so easy anchors don't dilute the gradient.
-    """
-    embeddings = F.normalize(embeddings, p=2, dim=1)
-    # ||a - b||^2 = 2 - 2 cos(a, b) for unit vectors. The clamp keeps sqrt's
-    # gradient finite for identical scans (e.g. duplicates drawn with replacement).
-    sim = embeddings @ embeddings.t()
-    dist = torch.sqrt(torch.clamp(2.0 - 2.0 * sim, min=1e-12))
-
-    labels = labels.view(-1, 1)
-    same_id = labels.eq(labels.t())
-    eye = torch.eye(labels.size(0), dtype=torch.bool, device=labels.device)
-
-    pos_mask = same_id & ~eye
-    hardest_pos = dist.masked_fill(~pos_mask, -1.0).max(dim=1).values
-    hardest_neg = dist.masked_fill(same_id, 1e6).min(dim=1).values
-
-    valid = pos_mask.any(dim=1) & (~same_id).any(dim=1)
-    losses = F.relu(hardest_pos - hardest_neg + margin) * valid
-    active = losses > 0
-    num_hard = int(active.sum().item())
-
-    loss = losses[active].mean() if num_hard > 0 else losses.sum() * 0.0
-    return loss, num_hard
 
 
 class AverageMeter(object):
