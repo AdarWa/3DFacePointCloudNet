@@ -273,7 +273,7 @@ class BallQuery(Function):
         torch.Tensor
             (B, npoint, nsample) tensor with the indicies of the features that form the query balls
         """
-        output = _ext.ball_query(new_xyz, xyz, fps_idx, radius, nsample)
+        output = _ext.ball_query(new_xyz, xyz, radius, nsample)
         ctx.mark_non_differentiable(output)
         return output
 
