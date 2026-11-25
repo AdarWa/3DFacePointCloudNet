@@ -60,7 +60,9 @@ python -m pointnet2.train.train_triplet -data_root /path/to/real_npy -model_chec
 [`notebooks/face_pipeline.ipynb`](notebooks/face_pipeline.ipynb) runs every step on a GPU (e.g. Kaggle):
 generation, 1000-class pre-training, triplet fine-tuning, PK (batch-hard) fine-tuning and a
 final comparison (ROC, CMC, score distributions, t-SNE, failure cases), all on identities
-unseen in training. All settings are in one configuration cell. Each stage is skipped when its
+unseen in training. With real data (`REAL_DATA`), broken or outlier scans are filtered out
+first (`pointnet2/data/quality.py`), and likely mislabelled training scans are removed before
+fine-tuning. All settings are in one configuration cell. Each stage is skipped when its
 `final.pth.tar` exists and resumes from `last.pth.tar` after an interruption.
 
 ### Training on generated faces

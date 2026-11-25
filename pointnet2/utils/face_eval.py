@@ -16,9 +16,11 @@ from pointnet2.data.TripletNpyFaceDataset import SingleScanNpyDataset
 # ---------------------------------------------------------------------------
 # Losses
 # ---------------------------------------------------------------------------
-def triplet_loss(anchor, positive, negative, margin=0.3):
+def triplet_loss(anchor, positive, negative, margin=0.3, active_only=False):
     """Triplet loss on given (anchor, positive, negative) embeddings.
 
+    With ``active_only`` the loss is averaged over the triplets that violate the
+    margin only, so already-satisfied (easy) triplets don't dilute the gradient.
     Returns ``(loss, stats)`` where ``stats`` has the mean anchor-positive and
     anchor-negative distances and the fraction of triplets violating the margin.
     """
@@ -28,6 +30,9 @@ def triplet_loss(anchor, positive, negative, margin=0.3):
     losses = F.relu(d_ap - d_an + margin)
     stats = {"d_ap": d_ap.mean().item(), "d_an": d_an.mean().item(),
              "active": (losses > 0).float().mean().item()}
+    if active_only:
+        active = losses > 0
+        return (losses[active].mean() if active.any() else losses.sum() * 0.0), stats
     return losses.mean(), stats
 
 
