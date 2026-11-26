@@ -116,8 +116,13 @@ def verification_metrics(g_feat, g_lab, p_feat, p_lab, fars=(1e-3, 1e-2), max_ra
     * curves:  ``fpr``, ``tpr`` (ROC), ``cmc`` (rank-1..max_rank identification
       rate), ``genuine`` / ``impostor`` similarity scores
     """
+    return similarity_metrics(g_feat @ p_feat.T, g_lab, p_lab, fars, max_rank)
+
+
+def similarity_metrics(sim, g_lab, p_lab, fars=(1e-3, 1e-2), max_rank=10):
+    """Same as ``verification_metrics`` but from a ``[n_gallery, n_probe]`` similarity
+    matrix, e.g. a weighted sum of the similarities of two modalities."""
     g_lab, p_lab = np.asarray(g_lab), np.asarray(p_lab)
-    sim = g_feat @ p_feat.T                             # [n_gallery, n_probe]
     same = g_lab[:, None] == p_lab[None, :]
 
     # identification: rank of the correct gallery entry for every probe

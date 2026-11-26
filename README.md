@@ -65,6 +65,15 @@ first (`pointnet2/data/quality.py`), and likely mislabelled training scans are r
 fine-tuning. All settings are in one configuration cell. Each stage is skipped when its
 `final.pth.tar` exists and resumes from `last.pth.tar` after an interruption.
 
+### RGB + depth fusion notebook
+[`notebooks/fusion_pipeline.ipynb`](notebooks/fusion_pipeline.ipynb) recognises people from paired
+`Raw_{image_id}_{subject_id}_{timestamp}_color.png` / `..._points.npy` files. It fuses frozen FaceNet
+colour embeddings (installed with `pip install --no-deps facenet-pytorch`) and embeddings of the depth
+model trained above, using a small fusion network. Modality dropout, auxiliary per-modality losses and
+gradient modulation (OGM) keep the network from ignoring one modality. Raw point clouds are cropped,
+oriented and converted to the training format by `pointnet2/data/raw_scan.py`. Evaluation uses an
+identity-disjoint train / val / test split.
+
 ### Training on generated faces
 Two steps (run from the repository root, after the setup above and downloading the BFM file):
 ```
